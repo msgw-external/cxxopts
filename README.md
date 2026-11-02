@@ -1,4 +1,17 @@
-[![Build Status](https://travis-ci.org/jarro2783/cxxopts.svg?branch=master)](https://travis-ci.org/jarro2783/cxxopts)
+<div align="center">
+
+[![Build Status](https://img.shields.io/github/actions/workflow/status/jarro2783/cxxopts/cmake.yml?label=build)](https://github.com/jarro2783/cxxopts/actions/workflows/cmake.yml)
+[![Conan](https://img.shields.io/conan/v/cxxopts)](https://conan.io/center/recipes/cxxopts)
+[![vcpkg](https://img.shields.io/vcpkg/v/cxxopts)](https://vcpkg.io/en/package/cxxopts)
+[![GitHub release](https://img.shields.io/github/v/release/jarro2783/cxxopts?label=github%20release)](https://github.com/jarro2783/cxxopts/releases)
+
+[![Header Only](https://img.shields.io/badge/header--only-yes-green.svg)](https://github.com/jarro2783/cxxopts)
+[![Mentioned in Awesome C++](https://awesome.re/mentioned-badge.svg)](https://github.com/fffaraz/awesome-cpp)
+[![Homebrew](https://img.shields.io/homebrew/installs/dy/cxxopts?label=brew%20downloads&logo=homebrew)](https://formulae.brew.sh/formula/cxxopts)
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
+</div>
 
 # Release versions
 
@@ -85,9 +98,6 @@ result["opt"].as<type>()
 to get its value. If "opt" doesn't exist, or isn't of the right type, then an
 exception will be thrown.
 
-Note that the result of `options.parse` should only be used as long as the
-`options` object that created it is in scope.
-
 ## Unrecognised arguments
 
 You can allow unrecognised arguments to be skipped. This applies to both
@@ -109,9 +119,9 @@ result.unmatched()
 
 Exceptional situations throw C++ exceptions. There are two types of
 exceptions: errors defining the options, and errors when parsing a list of
-arguments. All exceptions derive from `cxxopts::OptionException`. Errors
-defining options derive from `cxxopts::OptionSpecException` and errors
-parsing arguments derive from `cxxopts::OptionParseException`.
+arguments. All exceptions derive from `cxxopts::exceptions::exception`. Errors
+defining options derive from `cxxopts::exceptions::specification` and errors
+parsing arguments derive from `cxxopts::exceptions::parsing`.
 
 All exceptions define a `what()` function to get a printable string
 explaining the error.
@@ -119,10 +129,7 @@ explaining the error.
 ## Help groups
 
 Options can be placed into groups for the purposes of displaying help messages.
-To place options in a group, pass the group as a string to `add_options`. Then,
-when displaying the help, pass the groups that you would like displayed as a
-vector to the `help` function.
-
+To place options in a group, pass the group as a string to `add_options`. Then, when displaying the help, `help` by default prints help for all groups. If you want to only print help for a specific group, pass the groups that you would like displayed as a vector to the `help` function.
 ## Positional Arguments
 
 Positional arguments are those given without a preceding flag and can be used
@@ -139,10 +146,19 @@ options.add_options()
   ("server", "The server to execute on", cxxopts::value<std::string>())
   ("filenames", "The filename(s) to process", cxxopts::value<std::vector<std::string>>());
 
-options.parse_positional({"script", "server", "filenames"})
+options.parse_positional({"script", "server", "filenames"});
+
+// Parse options the usual way
+options.parse(argc, argv);
 ```
 
-Then parsing a set of arguments like:
+Note : `parse_positional` defaults to replacing the positionals with the arguments provided in the function call. To append to the existing list of positionals, please use `cxxopts::PositionalMode::Append`.
+
+```cpp
+options.parse_positional("another_option", cxxopts::PositionalMode::Append);
+```
+
+For example, parsing the following arguments:
 ~~~
 my_script.py my_server.com file1.txt file2.txt file3.txt
 ~~~
@@ -176,11 +192,23 @@ If an option had both, then not specifying it would give the value `"value"`,
 writing it on the command line as `--option` would give the value `"implicit"`,
 and writing `--option=another` would give it the value `"another"`.
 
+Note that if `option` has an implicit value, specifying `--option another` will not work. You must use `=` syntax - `--option=another` or `-o=another`(assumming `o` is a short name for the option). This is because no argument is required. Hence, there is no good way to determine if the next string is an argument to your option or a positional argument.
+
 Note that the default and implicit value is always stored as a string,
 regardless of the type that you want to store it in. It will be parsed as
 though it was given on the command line.
 
 Default values are not counted by `Options::count`.
+
+### Implicit values with disabled arguments
+
+You can specify an option for which an argument cannot be specified using below syntax.
+
+```cpp
+cxxopts::value<bool>()->implicit_value("true", cxxopts::ImplicitArgPolicy::Disabled)
+```
+
+In this case specifying option as `--option=<value>` is disallowed and will throw `specified_disabled_args` exception. Note that `--option value` is not supported for implicit values. It is treated as positional/unmatched.
 
 ## Boolean values
 
@@ -193,15 +221,47 @@ therefore, `-o false` does not work.
 
 ## `std::vector<T>` values
 
-Parsing of list of values in form of an `std::vector<T>` is also supported, as long as `T`
-can be parsed. To separate single values in a list the definition `CXXOPTS_VECTOR_DELIMITER`
-is used, which is ',' by default. Ensure that you use no whitespaces between values because
-those would be interpreted as the next command line option. Example for a command line option
+Parsing a list of values into a `std::vector<T>` is also supported, as long as `T`
+can be parsed. To separate single values in a list the define symbol `CXXOPTS_VECTOR_DELIMITER`
+is used, which is ',' by default. Ensure that you use no whitespaces between values
+(unless the entire list is double quoted) because those would be interpreted as the
+next command line option. Example for a command line option
 that can be parsed as a `std::vector<double>`:
 
 ~~~
 --my_list=1,-2.1,3,4.5
 ~~~
+
+If the list of values is quoted, then spaces can be included. For example:
+
+~~~
+--my_list="review,memory sanitize,build help,reformat"
+~~~
+
+This will be parsed into `review`, `memory sanitize`, `build help`, and `reformat`.
+
+Delimiter-based parsing can be disabled for an individual vector option:
+
+```cpp
+cxxopts::value<std::vector<std::string>>()
+  ->disable_list_delimiter()
+```
+
+This is useful when each option value contains delimiters that should be
+preserved for further parsing. For example:
+
+~~~
+--buffer-dimensions my_buf=3,4,5 --buffer-dimensions another_buf=16,16,8
+~~~
+
+With list delimiter parsing disabled, this is parsed as:
+
+```cpp
+std::vector<std::string>{
+  "my_buf=3,4,5",
+  "another_buf=16,16,8"
+}
+```
 
 ## Options specified multiple times
 
@@ -221,15 +281,62 @@ options.add_options()
 
 ## Custom help
 
-The string after the program name on the first line of the help can be
-completely replaced by calling `options.custom_help`. Note that you might
-also want to override the positional help by calling `options.positional_help`.
+`options.custom_help(text)` replaces the option synopsis after the program
+name in the generated `Usage:` line. `options.positional_help(text)` replaces
+the positional synopsis, which is appended when positional parsing has been
+configured with `options.parse_positional(...)`. These strings describe the
+command line; the registered options and positional mapping still determine
+how arguments are parsed.
+
+For example, this program customizes the usage line and appends an example
+while keeping the generated option descriptions:
+
+```cpp
+#include <iostream>
+#include <string>
+#include "cxxopts.hpp"
+
+int main(int argc, char** argv)
+{
+    cxxopts::Options options("convert", "Convert an input file");
+    options.add_options("General")
+        ("h,help", "Print help")
+        ("input", "Input file", cxxopts::value<std::string>());
+    options.add_options("Output")
+        ("o,output", "Output file", cxxopts::value<std::string>(), "PATH");
+    options.parse_positional({"input"});
+    options.custom_help("[OPTIONS]");
+    options.positional_help("FILE");
+
+    auto result = options.parse(argc, argv);
+    if (result.count("help"))
+    {
+        std::cout << options.help()
+                  << "\nExample:\n  convert source.txt -o result.txt\n";
+        return 0;
+    }
+    // Use result["input"] and result["output"] when present.
+    return 0;
+}
+```
+
+Running `convert --help` displays `convert [OPTIONS] FILE` in the usage line,
+both option groups, and the additional example. To show selected groups, use
+`options.help({"General"})` (or a list of group names); the other options are
+still accepted by the parser. Positional options are omitted from the option
+list by default; call `options.show_positional_help()` to include them.
+
+For entirely custom help, handle `result.count("help")` in the same way but
+print your own text instead of calling `options.help()`.
 
 
 ## Example
 
 Putting all together:
 ```cpp
+#include <iostream>
+#include "cxxopts.hpp"
+
 int main(int argc, char** argv)
 {
     cxxopts::Options options("test", "A brief description");
@@ -275,7 +382,3 @@ GCC >= 4.9 or clang >= 3.1 with libc++ are known to work.
 The following compilers are known not to work:
 
 * MSVC 2013
-
-# TODO list
-
-* Allow unrecognised options.

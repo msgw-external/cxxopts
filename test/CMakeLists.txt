@@ -22,6 +22,36 @@ add_executable(options_test main.cpp options.cpp)
 target_link_libraries(options_test cxxopts)
 add_test(options options_test)
 
+add_executable(options_test_noregex main.cpp options.cpp)
+target_link_libraries(options_test_noregex cxxopts)
+target_compile_definitions(options_test_noregex PRIVATE CXXOPTS_NO_REGEX)
+add_test(options_no_regex options_test_noregex)
+
+# The exception-based Catch tests cannot exercise exit-on-error mode. Build
+# standalone smoke tests with compiler exception support disabled instead.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    foreach(test_target options_test_noexceptions options_test_noexceptions_noregex)
+        add_executable(${test_target} no_exceptions.cpp)
+        target_link_libraries(${test_target} cxxopts)
+        target_compile_definitions(${test_target} PRIVATE CXXOPTS_NO_EXCEPTIONS)
+        target_compile_options(${test_target} PRIVATE -fno-exceptions)
+        add_test(NAME ${test_target} COMMAND ${test_target})
+        add_test(NAME ${test_target}_errors COMMAND ${CMAKE_COMMAND}
+            -DPROGRAM=$<TARGET_FILE:${test_target}>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_no_exceptions.cmake)
+    endforeach()
+    target_compile_definitions(options_test_noexceptions_noregex PRIVATE CXXOPTS_NO_REGEX)
+endif()
+
+# Run the parser tests under UBSan so undefined behaviour in integer parsing
+# (e.g. std::abs(INT64_MIN)) fails the build instead of going unnoticed.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU" AND NOT WIN32)
+    foreach(test_target options_test options_test_noregex)
+        target_compile_options(${test_target} PRIVATE -fsanitize=undefined -fno-sanitize-recover=undefined)
+        set_target_properties(${test_target} PROPERTIES LINK_FLAGS "-fsanitize=undefined -fno-sanitize-recover=undefined")
+    endforeach()
+endif()
+
 # test if the targets are findable from the build directory
 add_test(find-package-test ${CMAKE_CTEST_COMMAND}
     -C ${CMAKE_BUILD_TYPE}
@@ -32,6 +62,8 @@ add_test(find-package-test ${CMAKE_CTEST_COMMAND}
     --build-makeprogram ${CMAKE_MAKE_PROGRAM}
     --build-options
     "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+    "-DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}"
+    "-DCMAKE_CXX_EXTENSIONS=${CMAKE_CXX_EXTENSIONS}"
     "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
     "-Dcxxopts_DIR=${PROJECT_BINARY_DIR}"
 )
@@ -46,8 +78,32 @@ add_test(add-subdirectory-test ${CMAKE_CTEST_COMMAND}
     --build-makeprogram ${CMAKE_MAKE_PROGRAM}
     --build-options
     "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+    "-DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}"
+    "-DCMAKE_CXX_EXTENSIONS=${CMAKE_CXX_EXTENSIONS}"
     "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
 )
 
+foreach(includedir default relative absolute)
+    add_test(pkg-config-${includedir}-test ${CMAKE_CTEST_COMMAND}
+        -C ${CMAKE_BUILD_TYPE}
+        --build-and-test
+        "${CMAKE_CURRENT_SOURCE_DIR}/pkg-config-test"
+        "${CMAKE_CURRENT_BINARY_DIR}/pkg-config-${includedir}-test"
+        --build-generator ${CMAKE_GENERATOR}
+        --build-makeprogram ${CMAKE_MAKE_PROGRAM}
+        --build-options
+        "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+        "-DTEST_INCLUDEDIR=${includedir}"
+    )
+endforeach()
+
 add_executable(link_test link_a.cpp link_b.cpp)
 target_link_libraries(link_test cxxopts)
+
+if(("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang") AND ("${CMAKE_SYSTEM}" MATCHES "Linux"))
+    add_executable(fuzzer fuzz.cpp)
+    target_link_libraries(fuzzer PRIVATE cxxopts)
+    target_compile_options(fuzzer PRIVATE -fsanitize=fuzzer)
+    target_link_options(fuzzer PRIVATE -fsanitize=fuzzer)
+endif()
